@@ -98,3 +98,22 @@ def patch(img, pt, patch_size, padding='none'):
         else:
             raise ValueError('Invalid padding method')
     return patch
+
+
+def pad(img, padding, fill_value=0):
+    if type(padding) is tuple:
+        if len(padding) == 2:
+            top = bottom = padding[0]
+            right = left = padding[1]
+        elif len(padding) == 4:
+            top, right, bottom, left = padding
+        else:
+            raise ValueError('padding must be either an integer, a two-tuple' +
+                             ', or a four-tuple')
+    else:
+        top = right = bottom = left = padding
+    height, width = img.shape[:2]
+    img_padded = np.ones((height+top+bottom, width+right+left) + img.shape[2:])
+    img_padded *= fill_value
+    img_padded[top:top+height, left:left+width, ...] = img
+    return img_padded
