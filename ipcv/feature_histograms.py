@@ -4,54 +4,63 @@ from .misc import normalize, isophotes
 
 
 def go_hist(img, n_scales=4, scale_min=1.0, scale_ratio=2.0, n_bins=8,
-            tonal_scale=0.25, norm='l1', weights=None, signed=True,
+            tonal_scale=0.4, norm='l1', weights=None, signed=True,
             ori_offsets=None):
     '''Gradient orientation histograms
 
-    Generate a multi-scale gradient orientation histogram for the supplied
-    image.
+    Compute a multi-scale gradient orientation histogram for the given image.
 
-    Args:
-        img: Grayscale image as a (p,q) array.
-        n_scales: Number of scales for extracting gradients.
-        scale_min: The smallest scale at which gradients are extracted.
-        scale_ratio: The ratio between two consecutive scales.
-        n_bins: Number of histogram bins.
-        tonal_scale: The smoothing scale in the orientation dimension.
-        norm: Histogram normalization method.
-        signed: Use signed (360 deg.) or unsigned (180 deg.) orientations.
-        ori_offsets: A (p,q) array of pixel-wise offsets for the gradient
-            orientations.
-        weights: A list of (p,q) arrays with pixel-wise weights to adjust
-            histogram contributions.
+    Parameters
+    ----------
+    img: (h, w) array.
+        Input image.
+    n_scales: int
+        Number of scales.
+    scale_min: float
+        The smallest scale at which gradients are extracted.
+    scale_ratio: float
+        The ratio between two consecutive scales.
+    n_bins: int
+        Number of histogram bins.
+    tonal_scale: float
+        The smoothing scale in the orientation dimension.
+    norm: str
+        Histogram normalization method.
+    signed: bool
+        Use signed (360 deg.) or unsigned (180 deg.) orientations.
+    ori_offsets: (h, w) array
+        Pixel-wise offsets for the gradient orientations.
+    weights: A list of (h, w) arrays
+        Pixel-wise spatial weights to adjust histogram contributions.
 
-    Returns:
-        A gradient orientation histogram vector of dimensionality n_scales
-        * n_bins.
+    Returns
+    -------
+    hists: (n_bins, n_scales) or (n_bins, n_scales, len(weights)) array
+        Gradient orientation histograms for all combinations of scales and
+        spatial weights.
     '''
-    hists = []
-    scales = [float(scale_min)*scale_ratio**i for i in range(n_scales)]
+    hists_shape = (n_bins, n_scales)
+    if weights is not None:
+        hists_shape += (len(weights), )
+    hists = np.empty(hists_shape)
+    scales = scale_min*scale_ratio**np.arange(n_scales)
     if signed:
         limits = (-np.pi, np.pi)
     else:
         limits = (-np.pi/2, np.pi/2)
-    for s in scales:
+    for s_idx, s in enumerate(scales):
         go, go_m = gradient_orientation(img, s, signed)
         if ori_offsets is not None:
             if signed:
                 go = np.mod(go-ori_offsets, 2*np.pi)
             else:
                 go = np.mod(go-ori_offsets, np.pi)-np.pi/2
+        go_iso = isophotes(go, n_bins, limits, tonal_scale, 'von_mises') * go_m
         if weights is None:
-            weights_ = [go_m]
+            hists[:, s_idx] = np.sum(go_iso, axis=(1, 2))
         else:
-            weights_ = [w*go_m for w in weights]
-        for w in weights_:
-            iso = isophotes(go, n_bins, limits, tonal_scale, 'von_mises')
-            iso *= w[np.newaxis, ...]
-            h = np.sum(iso, axis=(1, 2))
-            hists.append(h)
-    hists = np.hstack(hists)
+            for w_idx, w in enumerate(weights):
+                hists[:, s_idx, w_idx] = np.sum(go_iso*w, axis=(1, 2))
     hists = normalize(hists, norm)
     return hists
 
@@ -60,35 +69,46 @@ def si_hist(img, n_scales=4, scale_min=1.0, scale_ratio=2.0, n_bins=8,
             tonal_scale=0.25, norm='l1', weights=None):
     '''Shape index histograms
 
-    Generate a multi-scale shape index histogram for the supplied image.
+    Compute a multi-scale shape index histogram for the given image.
 
-    Args:
-        img: Grayscale image as a (p,q) array.
-        n_scales: Number of scales for extracting shape indices.
-        scale_min: The smallest scale at which the shape indices are extracted.
-        scale_ratio: The ratio between two consecutive scales.
-        n_bins: Number of histogram bins.
-        tonal_scale: The smoothing scale in the shape index dimension.
-        norm: Histogram normalization method.
-        weights: A list of (p,q) arrays with pixel-wise weights to adjust
-            histogram contributions.
+    Parameters
+    ----------
+    img: (h, w) array.
+        Input image.
+    n_scales: int
+        Number of scales.
+    scale_min: float
+        The smallest scale at which gradients are extracted.
+    scale_ratio: float
+        The ratio between two consecutive scales.
+    n_bins: int
+        Number of histogram bins.
+    tonal_scale: float
+        The smoothing scale in the shape index dimension.
+    norm: str
+        Histogram normalization method.
+    weights: A list of (h, w) arrays
+        Pixel-wise spatial weights to adjust histogram contributions.
 
-    Returns:
-        A shape index histogram vector of dimensionality n_scales * n_bins.
+    Returns
+    -------
+    hists: (n_bins, n_scales) or (n_bins, n_scales, len(weights)) array
+        Shape index histograms for all combinations of scales and spatial
+        weights.
     '''
-    hists = []
-    scales = [float(scale_min)*scale_ratio**i for i in range(n_scales)]
-    for s in scales:
+    hists_shape = (n_bins, n_scales)
+    if weights is not None:
+        hists_shape += (len(weights),)
+    hists = np.empty(hists_shape)
+    scales = scale_min*scale_ratio**np.arange(n_scales)
+    for s_idx, s in enumerate(scales):
         si, si_c = shape_index(img, s)
-        si_iso = isophotes(si, n_bins, (-np.pi/2, np.pi/2), tonal_scale)
+        si_iso = isophotes(si, n_bins, (-np.pi/2, np.pi/2), tonal_scale)*si_c
         if weights is None:
-            weights_ = [si_c]
+            hists[:, s_idx] = np.sum(si_iso, axis=(1, 2))
         else:
-            weights_ = [w*si_c for w in weights]
-        for w in weights_:
-            h = np.sum(si_iso*w[np.newaxis, ...], axis=(1, 2))
-            hists.append(h)
-    hists = np.hstack(hists)
+            for w_idx, w in enumerate(weights):
+                hists[:, s_idx, w_idx] = np.sum(si_iso*w, axis=(1, 2))
     hists = normalize(hists, norm)
     return hists
 
@@ -98,62 +118,77 @@ def osi_hist(img, n_scales=4, scale_min=1.0, scale_ratio=2.0, n_bins=8,
              weights=None, ori_offsets=None, joint_hist=False):
     '''Oriented shape index histograms
 
-    Generate a multi-scale oriented shape index histogram for the supplied
-    image.
+    Compute a multi-scale oriented shape index histogram for the given image.
 
-    Args:
-        img: Grayscale image as a (p,q) array.
-        n_scales: Number of scales for extracting shape indices.
-        scale_min: The smallest scale at which the shape indices are extracted.
-        scale_ratio: The ratio between two consecutive scales.
-        n_bins: Number of histogram bins.
-        tonal_scale: The smoothing scale in the shape index dimension.
-        norm: Histogram normalization method.
-        weights: A list of (p,q) arrays with pixel-wise weights to adjust
-            histogram contributions.
+    Parameters
+    ----------
+    img: (h, w) array.
+        Input image.
+    n_scales: int
+        Number of scales.
+    scale_min: float
+        The smallest scale at which gradients are extracted.
+    scale_ratio: float
+        The ratio between two consecutive scales.
+    n_bins: int
+        Number of histogram bins for the shape index.
+    tonal_scale: float
+        The smoothing scale in the shape index dimension.
+    ori_n_bins: int
+        Number of histogram bins for the shape index orientation.
+    ori_tonal_scale: float
+        The smoothing scale in the shape index orientation dimension.
+    norm: str
+        Histogram normalization method.
+    weights: A list of (h, w) arrays
+        Pixel-wise spatial weights to adjust histogram contributions.
+    ori_offsets: (h, w) array
+        Pixel-wise offsets for the shape index orientations.
+    joint_hist: bool
+        Choose between the joint histogram or two marginalized histograms.
 
-    Returns:
-        A shape index histogram vector of dimensionality n_scales * n_bins.
+    Returns
+    -------
+    hists: array or two-tuple of arrays
+        If joint_hist: Joint oriented shape index histograms for all
+        combinations of scales and spatial weights are returned as a (n_bins,
+        ori_n_bins, n_scales) or (n_bins, ori_n_bins, n_scales, len(weights))
+        array.
+        If not joint_hist: Marginal oriented shape index histograms for all
+        combinations of scales and spatial weights are returned as a two-tuple
+        of arrays: ((n_bins, n_scales), (ori_n_bins, n_scales)) or ((n_bins,
+        n_scales, len(weights)), (ori_n_bins, n_scales, len(weights)))
     '''
-    hists = []
-    hists_ori = []
-    scales = [float(scale_min)*scale_ratio**i for i in range(n_scales)]
-    for s in scales:
+    if weights is None:
+        hists_shape = (n_bins, ori_n_bins, n_scales)
+    else:
+        hists_shape = (n_bins, ori_n_bins, n_scales, len(weights))
+    hists = np.empty(hists_shape)
+    scales = scale_min*scale_ratio**np.arange(n_scales)
+    for s_idx, s in enumerate(scales):
         si, si_c, si_o, si_om = shape_index(img, s, orientations=True)
         if ori_offsets is not None:
             si_o = np.mod(si_o+ori_offsets, np.pi)-np.pi/2
+        # Smooth bin contributions (= soft isophote images)
         iso_si = isophotes(si, n_bins, (-np.pi/2, np.pi/2), tonal_scale)
         iso_si_o = isophotes(si_o, ori_n_bins, (-np.pi/2, np.pi/2),
                              ori_tonal_scale, 'von_mises')
-        if joint_hist:
-            osih = (iso_si[np.newaxis, ...] * si_c
-                    * iso_si_o[:, np.newaxis, ...] * si_om)
-            if weights is None:
-                h = np.sum(osih, axis=(2, 3))
-                hists.append(np.ravel(h))
-            else:
-                for w in weights:
-                    h = np.sum(osih*w, axis=(2, 3))
-                    hists.append(np.ravel(h))
+        # Bin contributions for the joint histogram
+        iso_j = (iso_si[np.newaxis, ...] * si_c
+                 * iso_si_o[:, np.newaxis, ...] * si_om)
+        # Summarize bin contributions in the joint histograms
+        if weights is None:
+            hists[:, :, s_idx] = np.sum(iso_j, axis=(2, 3))
         else:
-            iso_si *= si_c
-            iso_si_o *= si_om
-            if weights is None:
-                h_si = np.sum(iso_si, axis=(1, 2))
-                h_si_o = np.sum(iso_si_o, axis=(1, 2))
-                hists.append(h_si)
-                hists_ori.append(h_si_o)
-            else:
-                for w in weights:
-                    h_si = np.sum(iso_si*w, axis=(1, 2))
-                    h_si_o = np.sum(iso_si_o*w, axis=(1, 2))
-                    hists.append(h_si)
-                    hists_ori.append(h_si_o)
-    hists = np.hstack(hists)
-    hists = normalize(hists, norm)
+            for w_idx, w in enumerate(weights):
+                hists[:, :, s_idx, w_idx] = np.sum(iso_j*w, axis=(2, 3))
+
     if joint_hist:
+        hists = normalize(hists, norm)
         return hists
     else:
-        hists_ori = np.hstack(hists_ori)
+        hists_si = np.sum(hists, axis=1)
+        hists_ori = np.sum(hists, axis=0)
+        hists_si = normalize(hists_si, norm)
         hists_ori = normalize(hists_ori, norm)
-        return np.hstack([hists, hists_ori])
+        return (hists_si, hists_ori)
